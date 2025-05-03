@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time Code Editor</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
+  <style>
+    body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: #282a36;
+  color: #f8f8f2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.editor-container {
+  width: 90%;
+  height: 80vh;
+  margin-top: 20px;
+  position: relative;
+}
+
+.CodeMirror {
+  height: 100%;
+  font-size: 16px;
+}
+
+.button-container {
+  margin: 10px;
+  display: flex;
+  gap: 10px;
+}
+
+.editor-btn {
+  padding: 10px 20px;
+  background: #6272a4;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  color: white;
+  font-size: 16px;
+}
+
+.editor-btn:hover {
+  background: #44475a;
+}
+
+.tooltip {
+  position: absolute;
+  top: -35px;
+  background: #44475a;
+  padding: 5px 10px;
+  border-radius: 5px;
+  opacity: 0;
+  transition: 0.3s;
+  pointer-events: none;
+  color: #fff;
+}
+
+.show-tooltip {
+  opacity: 1;
+}
+
+.user-cursor {
+  position: absolute;
+  width: 2px;
+  height: 20px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+  </style>
+</head>
+<body>
+
+  <div class="editor-container">
+    <textarea id="editor"></textarea>
+  </div>
+
+  <div class="button-container">
+    <button class="editor-btn" id="copyBtn">Copy</button>
+    <span class="tooltip" id="copyTooltip">Copied!</span>
+
+    <button class="editor-btn" id="pasteBtn">Paste</button>
+    <span class="tooltip" id="pasteTooltip">Pasted!</span>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    const socket = io();
+    let myColor = '#fff';
+
+    const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+      lineNumbers: true,
+      theme: 'dracula',
+      mode: 'javascript',
+    });
+
+    const copyBtn = document.getElementById('copyBtn');
+    const pasteBtn = document.getElementById('pasteBtn');
+    const copyTooltip = document.getElementById('copyTooltip');
+    const pasteTooltip = document.getElementById('pasteTooltip');
+
+    function showTooltip(tooltip) {
+      tooltip.classList.add('show-tooltip');
+      setTimeout(() => tooltip.classList.remove('show-tooltip'), 2000);
+    }
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(editor.getValue());
+        showTooltip(copyTooltip);
+      } catch (err) {
+        console.error('Copy failed', err);
+      }
+    });
+
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        editor.setValue(text);
+        const cursorPos = editor.getCursor();
+        socket.emit('code-change', { code: text, cursorPos });
+        showTooltip(pasteTooltip);
+      } catch (err) {
+        console.error('Paste failed', err);
+      }
+    });
+
+    socket.on('init', (data) => {
+      myColor = data.color;
+      editor.setValue(data.code);
+    });
+
+    socket.on('code-update', (data) => {
+      if (data.userId !== socket.id) {
+        editor.setValue(data.code);
+        updateCursor(data.userId, data.cursorPos, data.userColor);
+      }
+    });
+
+    socket.on('user-cursor', (data) => {
+      if (data.userId !== socket.id) {
+        updateCursor(data.userId, data.cursorPos, data.userColor);
+      }
+    });
+
+    socket.on('user-left', (userId) => {
+      const cursor = document.getElementById(`cursor-${userId}`);
+      if (cursor) cursor.remove();
+    });
+
+    editor.on('change', () => {
+      const code = editor.getValue();
+      const cursorPos = editor.getCursor();
+      socket.emit('code-change', { code, cursorPos });
+    });
+
+    editor.on('cursorActivity', () => {
+      const cursorPos = editor.getCursor();
+      socket.emit('cursor-position', cursorPos);
+    });
+
+    function updateCursor(userId, cursorPos, color) {
+      let cursor = document.getElementById(`cursor-${userId}`);
+      if (!cursor) {
+        cursor = document.createElement('div');
+        cursor.className = 'user-cursor';
+        cursor.id = `cursor-${userId}`;
+        document.querySelector('.editor-container').appendChild(cursor);
+      }
+      const coords = editor.cursorCoords(cursorPos);
+      cursor.style.left = `${coords.left}px`;
+      cursor.style.top = `${coords.top}px`;
+      cursor.style.backgroundColor = color;
+    }
+  </script>
+
+</body>
+</html>
